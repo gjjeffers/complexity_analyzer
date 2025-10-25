@@ -13,16 +13,19 @@ Complexity Analyzer is a lightweight static analysis utility that extracts code 
 
 ## Installation
 
-This repository is self-contained and only relies on the Python standard library. Clone it and install the package in editable mode if you want a CLI entry point:
+This repository is self-contained and only relies on the Python standard library. Clone it and, if you prefer an isolated interpreter, create a virtual environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install -e .
 ```
 
-Alternatively, you can invoke the module directly without installation by running `python -m complexity_analyzer` from the repository root.
+Run the module directly from the repository root to use the CLI without any packaging step:
+
+```bash
+python -m complexity_analyzer --help
+```
 
 ## Usage
 
