@@ -53,6 +53,34 @@ def sample_python_file(tmp_path) -> Path:
     return path
 
 
+@pytest.fixture()
+def sample_java_file(tmp_path) -> Path:
+    content = "\n".join(
+        [
+            "package demo;",
+            "",
+            "public class Example {",
+            "    /* Block comment",
+            "       continues */",
+            "    // Single line",
+            "    public int compute(int a, int b) {",
+            "        int sum = a + b;",
+            "        if (sum > 10 && a > 0) {",
+            "            return sum;",
+            "        } else if (sum == 0) {",
+            "            return 0;",
+            "        }",
+            "        return sum - 1;",
+            "    }",
+            "}",
+            "",
+        ]
+    )
+    path = tmp_path / "Example.java"
+    path.write_text(content)
+    return path
+
+
 def test_analyze_python_file_reports_expected_metrics(sample_python_file):
     result = analyze_file(sample_python_file)
 
@@ -106,6 +134,32 @@ def test_analyze_python_file_with_syntax_error_reports_warning(tmp_path):
     assert summary["code"] == 2
     assert summary["comments"] == 0
     assert summary["docstrings"] == 0
+
+
+def test_analyze_java_file_reports_expected_metrics(sample_java_file):
+    result = analyze_file(sample_java_file)
+
+    assert result["language"] == "java"
+
+    summary = result["summary"]
+    assert summary == {
+        "lines": 16,
+        "code": 12,
+        "comments": 3,
+        "blanks": 1,
+        "docstrings": 0,
+    }
+
+    cyclomatic = result["cyclomatic"]
+    assert cyclomatic["total"] == 4
+    assert cyclomatic["by_function"] == []
+
+    halstead = result["halstead"]
+    assert halstead["vocabulary"] > 0
+    assert halstead["length"] > 0
+
+    mi = result["maintainability_index"]
+    assert 0.0 <= mi <= 100.0
 
 
 def test_cli_json_output_omits_operand_maps(sample_python_file, capsys):
