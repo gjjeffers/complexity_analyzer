@@ -170,3 +170,15 @@ def test_cli_json_output_omits_operand_maps(sample_python_file, capsys):
     data = json.loads(captured.out)
     assert "operators" not in data["halstead"]
     assert "operands" not in data["halstead"]
+
+
+def test_cli_returns_3_on_unknown_extension(tmp_path, capsys):
+    path = tmp_path / "unknown.txt"
+    path.write_text("hello\n")
+
+    exit_code = main([str(path)])
+    assert exit_code == 3
+
+    captured = capsys.readouterr()
+    # Ensure an explanatory error message is emitted to stderr
+    assert "Could not detect language from file extension" in captured.err
