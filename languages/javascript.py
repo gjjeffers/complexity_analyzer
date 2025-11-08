@@ -448,7 +448,7 @@ def _tokenize_js(text: str) -> Iterable[str]:
                 i += 1
             tokens.append(text[start:i])
             for expr in expressions:
-                tokens.extend(_tokenize_text(expr))
+                tokens.extend(_tokenize_js(expr))
             continue
 
         tokens.append(ch)
