@@ -540,172 +540,179 @@ def _js_loc_metrics(text: str) -> Dict[str, int]:
     }
 
 
-def _strip_comments(text: str) -> str:
-    def _strip_template_expression(src: str, start: int) -> tuple[str, int]:
-        # start points to the "{" opening the expression. Return the stripped
-        # expression including the closing brace and the index just past it.
-        result: List[str] = []
-        i = start
-        n = len(src)
-        depth = 0
-        in_block = False
-        in_string: str | None = None
-        in_template = False
-        context = _initial_js_context()
+def _strip_template_expression(text: str, start: int) -> tuple[str, int]:
+    """Strip a template literal expression starting at ``text[start] == "{"``.
 
-        while i < n:
-            ch = src[i]
-            nxt = src[i + 1] if i + 1 < n else ""
+    The returned string includes the surrounding braces and any comments inside
+    the expression are replaced with whitespace so downstream tokenization can
+    safely process the embedded code. The second return value is the index just
+    past the closing brace.
+    """
 
-            if in_block:
-                if ch == "\n":
-                    result.append("\n")
-                    i += 1
-                    continue
-                if ch == "*" and nxt == "/":
-                    result.append("  ")
-                    in_block = False
-                    i += 2
-                else:
-                    result.append(" ")
-                    i += 1
-                continue
+    result: List[str] = []
+    i = start
+    n = len(text)
+    depth = 0
+    in_block = False
+    in_string: str | None = None
+    in_template = False
+    context = _initial_js_context()
 
-            if in_template:
-                if ch == "$" and nxt == "{":
-                    expr, i = _strip_template_expression(src, i + 1)
-                    result.append("$")
-                    result.append(expr)
-                    continue
-                result.append(ch)
-                if ch == "\n":
-                    i += 1
-                    continue
-                if ch == "\\" and nxt:
-                    result.append(src[i + 1])
-                    i += 2
-                    continue
-                if ch == "`":
-                    in_template = False
-                    _set_after_operand(context)
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+
+        if in_block:
+            if ch == "\n":
+                result.append("\n")
                 i += 1
                 continue
-
-            if in_string:
-                result.append(ch)
-                if ch == "\n":
-                    i += 1
-                    continue
-                if ch == "\\" and nxt:
-                    result.append(src[i + 1])
-                    i += 2
-                    continue
-                if ch == in_string:
-                    in_string = None
-                    _set_after_operand(context)
-                i += 1
-                continue
-
-            if ch.isspace():
-                result.append(ch)
-                if ch == "\n":
-                    _set_after_operator(context)
-                i += 1
-                continue
-
-            if ch == "/" and nxt == "*":
+            if ch == "*" and nxt == "/":
                 result.append("  ")
-                in_block = True
+                in_block = False
+                i += 2
+            else:
+                result.append(" ")
+                i += 1
+            continue
+
+        if in_template:
+            if ch == "$" and nxt == "{":
+                expr, i = _strip_template_expression(text, i + 1)
+                result.append("$")
+                result.append(expr)
+                continue
+            result.append(ch)
+            if ch == "\n":
+                i += 1
+                continue
+            if ch == "\\" and nxt:
+                result.append(text[i + 1])
                 i += 2
                 continue
+            if ch == "`":
+                in_template = False
+                _set_after_operand(context)
+            i += 1
+            continue
 
-            if ch == "/" and nxt == "/":
-                if _can_start_regex(context):
-                    regex_end = _consume_regex_literal(src, i)
-                    if regex_end is not None:
-                        literal = src[i:regex_end]
-                        result.append(literal)
-                        i = regex_end
-                        _set_after_operand(context)
-                        continue
-                result.append("  ")
-                i += 2
-                while i < n and src[i] != "\n":
-                    result.append(" ")
-                    i += 1
+        if in_string:
+            result.append(ch)
+            if ch == "\n":
+                i += 1
                 continue
+            if ch == "\\" and nxt:
+                result.append(text[i + 1])
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+                _set_after_operand(context)
+            i += 1
+            continue
 
+        if ch.isspace():
+            result.append(ch)
+            if ch == "\n":
+                _set_after_operator(context)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "*":
+            result.append("  ")
+            in_block = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "/":
             if _can_start_regex(context):
-                regex_end = _consume_regex_literal(src, i)
+                regex_end = _consume_regex_literal(text, i)
                 if regex_end is not None:
-                    literal = src[i:regex_end]
+                    literal = text[i:regex_end]
                     result.append(literal)
                     i = regex_end
                     _set_after_operand(context)
                     continue
-
-            if ch in {'"', "'"}:
-                in_string = ch
-                result.append(ch)
+            result.append("  ")
+            i += 2
+            while i < n and text[i] != "\n":
+                result.append(" ")
                 i += 1
-                continue
+            continue
 
-            if ch == "`":
-                in_template = True
-                result.append(ch)
-                i += 1
-                continue
-
-            if ch == "{":
-                depth += 1
-                result.append(ch)
-                _set_after_operator(context)
-                i += 1
-                continue
-
-            if ch == "}":
-                result.append(ch)
-                i += 1
+        if _can_start_regex(context):
+            regex_end = _consume_regex_literal(text, i)
+            if regex_end is not None:
+                literal = text[i:regex_end]
+                result.append(literal)
+                i = regex_end
                 _set_after_operand(context)
-                depth -= 1
-                if depth <= 0:
-                    break
                 continue
 
-            if ch.isalpha() or ch in ("_", "$"):
-                end = _consume_js_identifier(src, i)
-                identifier = src[i:end]
-                result.append(identifier)
-                _handle_identifier(context, identifier)
-                i = end
-                continue
-
-            if ch.isdigit():
-                end = _consume_js_number(src, i)
-                result.append(src[i:end])
-                _set_after_operand(context)
-                i = end
-                continue
-
+        if ch in {'"', "'"}:
+            in_string = ch
             result.append(ch)
-            if ch == "(":
-                _handle_open_paren(context)
-            elif ch == ")":
-                _handle_close_paren(context)
-            elif ch in "[{":
-                _set_after_operator(context)
-            elif ch in "]}":
-                _set_after_operand(context)
-            elif ch in ";,?:":
-                _set_after_operator(context)
-            elif ch == ".":
-                _set_after_operand(context)
-            else:
-                _set_after_operator(context)
             i += 1
+            continue
 
-        return "".join(result), i
+        if ch == "`":
+            in_template = True
+            result.append(ch)
+            i += 1
+            continue
 
+        if ch == "{":
+            depth += 1
+            result.append(ch)
+            _set_after_operator(context)
+            i += 1
+            continue
+
+        if ch == "}":
+            result.append(ch)
+            i += 1
+            _set_after_operand(context)
+            depth -= 1
+            if depth <= 0:
+                break
+            continue
+
+        if ch.isalpha() or ch in ("_", "$"):
+            end = _consume_js_identifier(text, i)
+            identifier = text[i:end]
+            result.append(identifier)
+            _handle_identifier(context, identifier)
+            i = end
+            continue
+
+        if ch.isdigit():
+            end = _consume_js_number(text, i)
+            result.append(text[i:end])
+            _set_after_operand(context)
+            i = end
+            continue
+
+        result.append(ch)
+        if ch == "(":
+            _handle_open_paren(context)
+        elif ch == ")":
+            _handle_close_paren(context)
+        elif ch in "[{":
+            _set_after_operator(context)
+        elif ch in "]}":
+            _set_after_operand(context)
+        elif ch in ";,?:":
+            _set_after_operator(context)
+        elif ch == ".":
+            _set_after_operand(context)
+        else:
+            _set_after_operator(context)
+        i += 1
+
+    return "".join(result), i
+
+
+def _strip_comments(text: str) -> str:
     result: List[str] = []
     i = 0
     n = len(text)
@@ -931,27 +938,11 @@ def _tokenize_js(text: str) -> Iterable[str]:
                     i += 2
                     continue
                 if curr == "$" and i + 1 < n and text[i + 1] == "{":
-                    i += 2
-                    expr_start = i
-                    depth = 1
-                    while i < n and depth > 0:
-                        curr = text[i]
-                        if curr == "\\" and i + 1 < n:
-                            i += 2
-                            continue
-                        if curr == "{":
-                            depth += 1
-                            i += 1
-                            continue
-                        if curr == "}":
-                            depth -= 1
-                            if depth == 0:
-                                expressions.append(text[expr_start:i])
-                                i += 1
-                                break
-                            i += 1
-                            continue
-                        i += 1
+                    expr_text, new_index = _strip_template_expression(text, i + 1)
+                    body = expr_text[1:-1] if len(expr_text) > 1 else ""
+                    if body:
+                        expressions.append(body)
+                    i = new_index
                     continue
                 if curr == "`":
                     i += 1
