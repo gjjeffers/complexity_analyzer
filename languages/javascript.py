@@ -59,6 +59,28 @@ JS_KEYWORDS = {
 JS_LITERAL_KEYWORDS = {"true", "false", "null", "undefined", "NaN", "Infinity"}
 JS_OPERATOR_KEYWORDS = JS_KEYWORDS - JS_LITERAL_KEYWORDS
 
+_REGEX_PREFIX_KEYWORDS = {
+    "return",
+    "case",
+    "throw",
+    "default",
+    "do",
+    "else",
+    "typeof",
+    "delete",
+    "void",
+    "instanceof",
+    "in",
+    "of",
+    "new",
+    "await",
+    "yield",
+}
+
+_CONTROL_FLOW_KEYWORDS = {"if", "while", "for", "with", "switch", "catch"}
+
+_REGEX_FLAG_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
 JS_OPERATORS = {
     "+",
     "-",
@@ -160,6 +182,125 @@ MULTI_CHAR_OPERATORS = sorted(
 DECISION_KEYWORDS = {"if", "for", "while", "case", "catch", "switch", "do"}
 
 
+def _consume_js_identifier(text: str, start: int) -> int:
+    i = start + 1
+    n = len(text)
+    while i < n and (text[i].isalnum() or text[i] in ("_", "$")):
+        i += 1
+    return i
+
+
+def _consume_js_number(text: str, start: int) -> int:
+    i = start + 1
+    n = len(text)
+    while i < n and (
+        text[i].isalnum()
+        or text[i]
+        in (
+            "_",
+            ".",
+            "x",
+            "X",
+            "b",
+            "B",
+            "o",
+            "O",
+            "e",
+            "E",
+            "+",
+            "-",
+        )
+    ):
+        i += 1
+    return i
+
+
+def _consume_regex_literal(text: str, start: int) -> int | None:
+    i = start + 1
+    n = len(text)
+    escaped = False
+    in_class = False
+
+    while i < n:
+        ch = text[i]
+        if ch == "\n":
+            return None
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == "[":
+            in_class = True
+        elif ch == "]" and in_class:
+            in_class = False
+        elif ch == "/" and not in_class:
+            if i == start + 1:
+                return None
+            i += 1
+            while i < n and text[i] in _REGEX_FLAG_CHARS:
+                i += 1
+            return i
+        i += 1
+
+    return None
+
+
+def _initial_js_context() -> Dict[str, object]:
+    return {
+        "last": "start",
+        "pending_control": None,
+        "paren_stack": [],
+    }
+
+
+def _can_start_regex(context: Dict[str, object]) -> bool:
+    return context["last"] in {"start", "after_operator"}
+
+
+def _set_after_operator(context: Dict[str, object]) -> None:
+    context["last"] = "after_operator"
+    # keep pending_control for constructs like "if" before "("
+
+
+def _set_after_operand(context: Dict[str, object]) -> None:
+    context["last"] = "after_operand"
+    context["pending_control"] = None
+
+
+def _handle_identifier(context: Dict[str, object], identifier: str) -> None:
+    if identifier in _CONTROL_FLOW_KEYWORDS:
+        context["pending_control"] = identifier
+        context["last"] = "after_operator"
+    elif identifier in _REGEX_PREFIX_KEYWORDS:
+        context["pending_control"] = None
+        context["last"] = "after_operator"
+    else:
+        _set_after_operand(context)
+
+
+def _handle_open_paren(context: Dict[str, object]) -> None:
+    stack = context["paren_stack"]
+    if context["pending_control"]:
+        stack.append(("control", context["pending_control"]))
+        context["pending_control"] = None
+    else:
+        stack.append(("group", None))
+    _set_after_operator(context)
+
+
+def _handle_close_paren(context: Dict[str, object]) -> None:
+    stack = context["paren_stack"]
+    if stack:
+        kind, _ = stack.pop()
+        if kind == "control":
+            _set_after_operator(context)
+        else:
+            _set_after_operand(context)
+    else:
+        _set_after_operand(context)
+    context["pending_control"] = None
+
+
 class JavaScriptAnalyzer(BaseAnalyzer):
     language = "javascript"
     extensions = {".js", ".jsx", ".mjs", ".cjs"}
@@ -203,72 +344,162 @@ class JavaScriptAnalyzer(BaseAnalyzer):
 def _js_loc_metrics(text: str) -> Dict[str, int]:
     lines = text.splitlines()
     total = len(lines)
-    blank_lines = 0
+    blank_lines = sum(1 for line in lines if not line.strip())
     comment_lines: Set[int] = set()
 
-    block_comment = False
-    for idx, line in enumerate(lines, start=1):
-        stripped = line.strip()
-        if not stripped:
-            blank_lines += 1
+    context = _initial_js_context()
+    in_block = False
+    in_string: str | None = None
+    in_template = False
 
-        i = 0
-        length = len(line)
-        line_has_comment = block_comment
-        in_string: str | None = None
-        in_template = False
+    i = 0
+    n = len(text)
+    line_no = 1
 
-        while i < length:
-            ch = line[i]
-            nxt = line[i + 1] if i + 1 < length else ""
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
 
-            if block_comment:
-                line_has_comment = True
-                if ch == "*" and nxt == "/":
-                    block_comment = False
-                    i += 2
-                else:
-                    i += 1
-                continue
-
-            if in_template:
-                if ch == "\\" and nxt:
-                    i += 2
-                    continue
-                if ch == "`":
-                    in_template = False
+        if in_block:
+            comment_lines.add(line_no)
+            if ch == "\n":
+                line_no += 1
                 i += 1
                 continue
-
-            if in_string:
-                if ch == "\\" and nxt:
-                    i += 2
-                    continue
-                if ch == in_string:
-                    in_string = None
+            if ch == "*" and nxt == "/":
+                comment_lines.add(line_no)
+                in_block = False
+                i += 2
+            else:
                 i += 1
-                continue
+            continue
 
-            if ch == "/" and nxt == "/":
-                line_has_comment = True
-                break
-            if ch == "/" and nxt == "*":
-                block_comment = True
-                line_has_comment = True
+        if in_template:
+            if ch == "\n":
+                line_no += 1
+            if ch == "\\" and nxt:
                 i += 2
                 continue
-            if ch in {'"', "'"}:
-                in_string = ch
-                i += 1
-                continue
             if ch == "`":
-                in_template = True
-                i += 1
-                continue
+                in_template = False
+                _set_after_operand(context)
             i += 1
+            continue
 
-        if line_has_comment:
-            comment_lines.add(idx)
+        if in_string:
+            if ch == "\n":
+                line_no += 1
+            if ch == "\\" and nxt:
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+                _set_after_operand(context)
+            i += 1
+            continue
+
+        if ch.isspace():
+            if ch == "\n":
+                line_no += 1
+                _set_after_operator(context)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "*":
+            comment_lines.add(line_no)
+            in_block = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "/":
+            if _can_start_regex(context):
+                regex_end = _consume_regex_literal(text, i)
+                if regex_end is not None:
+                    i = regex_end
+                    _set_after_operand(context)
+                    continue
+            comment_lines.add(line_no)
+            i += 2
+            while i < n and text[i] != "\n":
+                i += 1
+            _set_after_operator(context)
+            continue
+
+        if _can_start_regex(context):
+            regex_end = _consume_regex_literal(text, i)
+            if regex_end is not None:
+                i = regex_end
+                _set_after_operand(context)
+                continue
+
+        if ch in {'"', "'"}:
+            in_string = ch
+            i += 1
+            continue
+
+        if ch == "`":
+            in_template = True
+            i += 1
+            continue
+
+        if ch.isalpha() or ch in ("_", "$"):
+            end = _consume_js_identifier(text, i)
+            identifier = text[i:end]
+            _handle_identifier(context, identifier)
+            i = end
+            continue
+
+        if ch.isdigit():
+            end = _consume_js_number(text, i)
+            _set_after_operand(context)
+            i = end
+            continue
+
+        matched = False
+        for op in MULTI_CHAR_OPERATORS:
+            if text.startswith(op, i):
+                i += len(op)
+                if op in {"++", "--"} and context["last"] == "after_operand":
+                    _set_after_operand(context)
+                else:
+                    _set_after_operator(context)
+                matched = True
+                break
+        if matched:
+            continue
+
+        if ch == "(":
+            _handle_open_paren(context)
+            i += 1
+            continue
+
+        if ch == ")":
+            _handle_close_paren(context)
+            i += 1
+            continue
+
+        if ch in "[{":
+            _set_after_operator(context)
+            i += 1
+            continue
+
+        if ch in "}]":
+            _set_after_operand(context)
+            i += 1
+            continue
+
+        if ch in ";,?:":
+            _set_after_operator(context)
+            i += 1
+            continue
+
+        if ch == ".":
+            _set_after_operand(context)
+            i += 1
+            continue
+
+        _set_after_operator(context)
+        i += 1
 
     sloc = max(0, total - blank_lines - len(comment_lines))
 
@@ -287,51 +518,61 @@ def _strip_comments(text: str) -> str:
     in_block = False
     in_string: str | None = None
     in_template = False
+    context = _initial_js_context()
 
     while i < n:
         ch = text[i]
         nxt = text[i + 1] if i + 1 < n else ""
 
         if in_block:
+            if ch == "\n":
+                result.append("\n")
+                i += 1
+                continue
             if ch == "*" and nxt == "/":
                 result.append("  ")
                 in_block = False
                 i += 2
             else:
-                result.append("\n" if ch == "\n" else " ")
+                result.append(" ")
                 i += 1
             continue
 
         if in_template:
             result.append(ch)
-            if ch == "\\" and i + 1 < n:
+            if ch == "\n":
+                i += 1
+                continue
+            if ch == "\\" and nxt:
                 result.append(text[i + 1])
                 i += 2
-            elif ch == "`":
+                continue
+            if ch == "`":
                 in_template = False
-                i += 1
-            else:
-                i += 1
+                _set_after_operand(context)
+            i += 1
             continue
 
         if in_string:
             result.append(ch)
-            if ch == "\\" and i + 1 < n:
+            if ch == "\n":
+                i += 1
+                continue
+            if ch == "\\" and nxt:
                 result.append(text[i + 1])
                 i += 2
-            elif ch == in_string:
+                continue
+            if ch == in_string:
                 in_string = None
-                i += 1
-            else:
-                i += 1
+                _set_after_operand(context)
+            i += 1
             continue
 
-        if ch == "/" and nxt == "/":
-            result.append("  ")
-            i += 2
-            while i < n and text[i] != "\n":
-                result.append(" ")
-                i += 1
+        if ch.isspace():
+            result.append(ch)
+            if ch == "\n":
+                _set_after_operator(context)
+            i += 1
             continue
 
         if ch == "/" and nxt == "*":
@@ -339,6 +580,31 @@ def _strip_comments(text: str) -> str:
             in_block = True
             i += 2
             continue
+
+        if ch == "/" and nxt == "/":
+            if _can_start_regex(context):
+                regex_end = _consume_regex_literal(text, i)
+                if regex_end is not None:
+                    literal = text[i:regex_end]
+                    result.append(literal)
+                    i = regex_end
+                    _set_after_operand(context)
+                    continue
+            result.append("  ")
+            i += 2
+            while i < n and text[i] != "\n":
+                result.append(" ")
+                i += 1
+            continue
+
+        if _can_start_regex(context):
+            regex_end = _consume_regex_literal(text, i)
+            if regex_end is not None:
+                literal = text[i:regex_end]
+                result.append(literal)
+                i = regex_end
+                _set_after_operand(context)
+                continue
 
         if ch in {'"', "'"}:
             in_string = ch
@@ -352,7 +618,50 @@ def _strip_comments(text: str) -> str:
             i += 1
             continue
 
+        if ch.isalpha() or ch in ("_", "$"):
+            end = _consume_js_identifier(text, i)
+            identifier = text[i:end]
+            result.append(identifier)
+            _handle_identifier(context, identifier)
+            i = end
+            continue
+
+        if ch.isdigit():
+            end = _consume_js_number(text, i)
+            result.append(text[i:end])
+            _set_after_operand(context)
+            i = end
+            continue
+
+        matched = False
+        for op in MULTI_CHAR_OPERATORS:
+            if text.startswith(op, i):
+                result.append(op)
+                i += len(op)
+                if op in {"++", "--"} and context["last"] == "after_operand":
+                    _set_after_operand(context)
+                else:
+                    _set_after_operator(context)
+                matched = True
+                break
+        if matched:
+            continue
+
         result.append(ch)
+        if ch == "(":
+            _handle_open_paren(context)
+        elif ch == ")":
+            _handle_close_paren(context)
+        elif ch in "[{":
+            _set_after_operator(context)
+        elif ch in "}]":
+            _set_after_operand(context)
+        elif ch in ";,?:":
+            _set_after_operator(context)
+        elif ch == ".":
+            _set_after_operand(context)
+        else:
+            _set_after_operator(context)
         i += 1
 
     return "".join(result)
