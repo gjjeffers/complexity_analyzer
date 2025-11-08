@@ -671,36 +671,36 @@ def _tokenize_js(text: str) -> Iterable[str]:
     tokens: List[str] = []
     i = 0
     n = len(text)
+    context = _initial_js_context()
+
     while i < n:
         ch = text[i]
         if ch.isspace():
+            if ch == "\n":
+                _set_after_operator(context)
             i += 1
             continue
+
+        if ch == "/" and _can_start_regex(context):
+            regex_end = _consume_regex_literal(text, i)
+            if regex_end is not None:
+                tokens.append(text[i:regex_end])
+                i = regex_end
+                _set_after_operand(context)
+                continue
 
         matched = False
         for op in MULTI_CHAR_OPERATORS:
             if text.startswith(op, i):
                 tokens.append(op)
                 i += len(op)
+                if op in {"++", "--"} and context["last"] == "after_operand":
+                    _set_after_operand(context)
+                else:
+                    _set_after_operator(context)
                 matched = True
                 break
         if matched:
-            continue
-
-        if ch.isalpha() or ch in ("_", "$"):
-            start = i
-            i += 1
-            while i < n and (text[i].isalnum() or text[i] in ("_", "$")):
-                i += 1
-            tokens.append(text[start:i])
-            continue
-
-        if ch.isdigit():
-            start = i
-            i += 1
-            while i < n and (text[i].isalnum() or text[i] in ("_", ".", "x", "X", "b", "B", "o", "O", "e", "E", "+", "-")):
-                i += 1
-            tokens.append(text[start:i])
             continue
 
         if ch in {'"', "'"}:
@@ -715,8 +715,11 @@ def _tokenize_js(text: str) -> Iterable[str]:
                 if curr == delimiter:
                     i += 1
                     break
+                if curr == "\n":
+                    break
                 i += 1
             tokens.append(text[start:i])
+            _set_after_operand(context)
             continue
 
         if ch == "`":
@@ -758,9 +761,39 @@ def _tokenize_js(text: str) -> Iterable[str]:
             tokens.append(text[start:i])
             for expr in expressions:
                 tokens.extend(_tokenize_js(expr))
+            _set_after_operand(context)
+            continue
+
+        if ch.isalpha() or ch in ("_", "$"):
+            end = _consume_js_identifier(text, i)
+            identifier = text[i:end]
+            tokens.append(identifier)
+            _handle_identifier(context, identifier)
+            i = end
+            continue
+
+        if ch.isdigit():
+            end = _consume_js_number(text, i)
+            tokens.append(text[i:end])
+            _set_after_operand(context)
+            i = end
             continue
 
         tokens.append(ch)
+        if ch == "(":
+            _handle_open_paren(context)
+        elif ch == ")":
+            _handle_close_paren(context)
+        elif ch in "[{":
+            _set_after_operator(context)
+        elif ch in "}]":
+            _set_after_operand(context)
+        elif ch in ";,?:":
+            _set_after_operator(context)
+        elif ch == ".":
+            _set_after_operand(context)
+        else:
+            _set_after_operator(context)
         i += 1
 
     return tokens
