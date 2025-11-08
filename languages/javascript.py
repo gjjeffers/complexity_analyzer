@@ -413,16 +413,42 @@ def _tokenize_js(text: str) -> Iterable[str]:
         if ch == "`":
             start = i
             i += 1
+            expressions: List[str] = []
             while i < n:
                 curr = text[i]
                 if curr == "\\" and i + 1 < n:
                     i += 2
+                    continue
+                if curr == "$" and i + 1 < n and text[i + 1] == "{":
+                    i += 2
+                    expr_start = i
+                    depth = 1
+                    while i < n and depth > 0:
+                        curr = text[i]
+                        if curr == "\\" and i + 1 < n:
+                            i += 2
+                            continue
+                        if curr == "{":
+                            depth += 1
+                            i += 1
+                            continue
+                        if curr == "}":
+                            depth -= 1
+                            if depth == 0:
+                                expressions.append(text[expr_start:i])
+                                i += 1
+                                break
+                            i += 1
+                            continue
+                        i += 1
                     continue
                 if curr == "`":
                     i += 1
                     break
                 i += 1
             tokens.append(text[start:i])
+            for expr in expressions:
+                tokens.extend(_tokenize_text(expr))
             continue
 
         tokens.append(ch)
