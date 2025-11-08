@@ -512,6 +512,171 @@ def _js_loc_metrics(text: str) -> Dict[str, int]:
 
 
 def _strip_comments(text: str) -> str:
+    def _strip_template_expression(src: str, start: int) -> tuple[str, int]:
+        # start points to the "{" opening the expression. Return the stripped
+        # expression including the closing brace and the index just past it.
+        result: List[str] = []
+        i = start
+        n = len(src)
+        depth = 0
+        in_block = False
+        in_string: str | None = None
+        in_template = False
+        context = _initial_js_context()
+
+        while i < n:
+            ch = src[i]
+            nxt = src[i + 1] if i + 1 < n else ""
+
+            if in_block:
+                if ch == "\n":
+                    result.append("\n")
+                    i += 1
+                    continue
+                if ch == "*" and nxt == "/":
+                    result.append("  ")
+                    in_block = False
+                    i += 2
+                else:
+                    result.append(" ")
+                    i += 1
+                continue
+
+            if in_template:
+                if ch == "$" and nxt == "{":
+                    expr, i = _strip_template_expression(src, i + 1)
+                    result.append("$")
+                    result.append(expr)
+                    continue
+                result.append(ch)
+                if ch == "\n":
+                    i += 1
+                    continue
+                if ch == "\\" and nxt:
+                    result.append(src[i + 1])
+                    i += 2
+                    continue
+                if ch == "`":
+                    in_template = False
+                    _set_after_operand(context)
+                i += 1
+                continue
+
+            if in_string:
+                result.append(ch)
+                if ch == "\n":
+                    i += 1
+                    continue
+                if ch == "\\" and nxt:
+                    result.append(src[i + 1])
+                    i += 2
+                    continue
+                if ch == in_string:
+                    in_string = None
+                    _set_after_operand(context)
+                i += 1
+                continue
+
+            if ch.isspace():
+                result.append(ch)
+                if ch == "\n":
+                    _set_after_operator(context)
+                i += 1
+                continue
+
+            if ch == "/" and nxt == "*":
+                result.append("  ")
+                in_block = True
+                i += 2
+                continue
+
+            if ch == "/" and nxt == "/":
+                if _can_start_regex(context):
+                    regex_end = _consume_regex_literal(src, i)
+                    if regex_end is not None:
+                        literal = src[i:regex_end]
+                        result.append(literal)
+                        i = regex_end
+                        _set_after_operand(context)
+                        continue
+                result.append("  ")
+                i += 2
+                while i < n and src[i] != "\n":
+                    result.append(" ")
+                    i += 1
+                continue
+
+            if _can_start_regex(context):
+                regex_end = _consume_regex_literal(src, i)
+                if regex_end is not None:
+                    literal = src[i:regex_end]
+                    result.append(literal)
+                    i = regex_end
+                    _set_after_operand(context)
+                    continue
+
+            if ch in {'"', "'"}:
+                in_string = ch
+                result.append(ch)
+                i += 1
+                continue
+
+            if ch == "`":
+                in_template = True
+                result.append(ch)
+                i += 1
+                continue
+
+            if ch == "{":
+                depth += 1
+                result.append(ch)
+                _set_after_operator(context)
+                i += 1
+                continue
+
+            if ch == "}":
+                result.append(ch)
+                i += 1
+                _set_after_operand(context)
+                depth -= 1
+                if depth <= 0:
+                    break
+                continue
+
+            if ch.isalpha() or ch in ("_", "$"):
+                end = _consume_js_identifier(src, i)
+                identifier = src[i:end]
+                result.append(identifier)
+                _handle_identifier(context, identifier)
+                i = end
+                continue
+
+            if ch.isdigit():
+                end = _consume_js_number(src, i)
+                result.append(src[i:end])
+                _set_after_operand(context)
+                i = end
+                continue
+
+            result.append(ch)
+            if ch == "(":
+                _handle_open_paren(context)
+            elif ch == ")":
+                _handle_close_paren(context)
+            elif ch in "[{":
+                _set_after_operator(context)
+            elif ch in "]}":
+                _set_after_operand(context)
+            elif ch in ";,?:":
+                _set_after_operator(context)
+            elif ch == ".":
+                _set_after_operand(context)
+            else:
+                _set_after_operator(context)
+            i += 1
+
+        return "".join(result), i
+
     result: List[str] = []
     i = 0
     n = len(text)
@@ -539,6 +704,11 @@ def _strip_comments(text: str) -> str:
             continue
 
         if in_template:
+            if ch == "$" and nxt == "{":
+                expr, i = _strip_template_expression(text, i + 1)
+                result.append("$")
+                result.append(expr)
+                continue
             result.append(ch)
             if ch == "\n":
                 i += 1
