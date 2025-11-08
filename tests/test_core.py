@@ -15,7 +15,7 @@ from complexity_analyzer.core import analyze_file, available_languages, detect_l
 
 def test_available_languages_are_sorted_and_known():
     langs = available_languages()
-    assert langs == ["java", "python"]
+    assert langs == ["java", "javascript", "python"]
 
 
 @pytest.mark.parametrize(
@@ -23,6 +23,7 @@ def test_available_languages_are_sorted_and_known():
     [
         ("example.py", "python"),
         ("Example.JAVA", "java"),
+        ("widget.mjs", "javascript"),
         ("unknown.txt", None),
     ],
 )
@@ -77,6 +78,39 @@ def sample_java_file(tmp_path) -> Path:
         ]
     )
     path = tmp_path / "Example.java"
+    path.write_text(content)
+    return path
+
+
+@pytest.fixture()
+def sample_js_file(tmp_path) -> Path:
+    content = "\n".join(
+        [
+            "// Leading comment",
+            "",
+            "export function compute(a, b) {",
+            "  /* Block comment start",
+            "     continues here */",
+            "  const sum = a + b;",
+            "  if (sum > 10 && a > 0) {",
+            "    return sum;",
+            "  } else if (sum === 0) {",
+            "    return 0;",
+            "  }",
+            "  return sum - 1;",
+            "}",
+            "",
+            "export default function accumulate(items) {",
+            "  let total = 0;",
+            "  for (const item of items ?? []) {",
+            "    total += item.value ?? 0;",
+            "  }",
+            "  return total;",
+            "}",
+            "",
+        ]
+    )
+    path = tmp_path / "module.js"
     path.write_text(content)
     return path
 
@@ -152,6 +186,32 @@ def test_analyze_java_file_reports_expected_metrics(sample_java_file):
 
     cyclomatic = result["cyclomatic"]
     assert cyclomatic["total"] == 4
+    assert cyclomatic["by_function"] == []
+
+    halstead = result["halstead"]
+    assert halstead["vocabulary"] > 0
+    assert halstead["length"] > 0
+
+    mi = result["maintainability_index"]
+    assert 0.0 <= mi <= 100.0
+
+
+def test_analyze_js_file_reports_expected_metrics(sample_js_file):
+    result = analyze_file(sample_js_file)
+
+    assert result["language"] == "javascript"
+
+    summary = result["summary"]
+    assert summary == {
+        "lines": 21,
+        "code": 16,
+        "comments": 3,
+        "blanks": 2,
+        "docstrings": 0,
+    }
+
+    cyclomatic = result["cyclomatic"]
+    assert cyclomatic["total"] == 7
     assert cyclomatic["by_function"] == []
 
     halstead = result["halstead"]

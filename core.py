@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from .languages import JavaAnalyzer, PythonAnalyzer
+from .languages import JavaAnalyzer, JavaScriptAnalyzer, PythonAnalyzer
 from .languages.base import BaseAnalyzer
 
 __all__ = [
@@ -19,6 +19,7 @@ def _build_analyzers() -> List[BaseAnalyzer]:
     return [
         PythonAnalyzer(),
         JavaAnalyzer(),
+        JavaScriptAnalyzer(),
     ]
 
 

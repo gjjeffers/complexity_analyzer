@@ -1,7 +1,7 @@
 """
 Complexity Analyzer
 
-Lightweight static analysis for supported languages (Python, Java):
+Lightweight static analysis for supported languages (Python, Java, JavaScript):
 LOC, Cyclomatic Complexity, Halstead metrics, and Maintainability Index.
 
 Usage (CLI):

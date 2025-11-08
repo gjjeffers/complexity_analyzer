@@ -1,8 +1,8 @@
 # Complexity Analyzer
 
 Complexity Analyzer is a lightweight static analysis toolkit that reports
-maintainability metrics for source files. It currently supports both Python and
-Java code, producing:
+maintainability metrics for source files. It currently supports Python, Java,
+and JavaScript code, producing:
 
 * Source line counts (total, code, comment, blank, and docstring lines)
 * Cyclomatic complexity totals (with per-function detail for Python)
@@ -52,7 +52,7 @@ You can import the core helpers to integrate the analyzer into your own tools:
 ```python
 from complexity_analyzer import analyze_file, available_languages
 
-print(available_languages())  # ['java', 'python']
+print(available_languages())  # ['java', 'javascript', 'python']
 metrics = analyze_file("src/example/Foo.java")
 ```
 
@@ -61,14 +61,26 @@ JSON output from the CLI, the Halstead operator/operand frequency tables are
 omitted by default to keep the payload concise. Pass `--show-operands` to retain
 the detailed maps.
 
-## Java Support
+## Language Support
 
-Java files benefit from the same metrics as Python. The analyzer performs basic
-lexical tokenization to compute Halstead and cyclomatic complexity scores, while
-the maintainability index is derived from those metrics and the effective source
-lines of code. Per-method cyclomatic complexity is not currently reported for
-Java because it would require a full parser, but the aggregate results match the
-module-level reporting used by many tools.
+### Python
+
+Python files benefit from detailed metrics, including per-function cyclomatic
+complexity driven by the built-in AST module.
+
+### Java
+
+Java files use lexical tokenization to compute Halstead and cyclomatic
+complexity scores, while the maintainability index is derived from those metrics
+and the effective source lines of code. Per-method cyclomatic complexity is not
+currently reported for Java because it would require a full parser, but the
+aggregate results match the module-level reporting used by many tools.
+
+### JavaScript
+
+JavaScript analysis mirrors the Java approach. The analyzer recognizes modern
+syntax, strips comments, and performs token-based Halstead and cyclomatic
+complexity calculations across `.js`, `.jsx`, `.mjs`, and `.cjs` files.
 
 ## Development
 
