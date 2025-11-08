@@ -245,6 +245,35 @@ def _consume_regex_literal(text: str, start: int) -> int | None:
     return None
 
 
+def _is_regex_literal(token: str) -> bool:
+    if len(token) < 3 or token[0] != "/":
+        return False
+
+    escaped = False
+    in_class = False
+
+    for i in range(1, len(token)):
+        ch = token[i]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == "[":
+            in_class = True
+            continue
+        if ch == "]" and in_class:
+            in_class = False
+            continue
+        if ch == "/" and not in_class:
+            if i == 1:
+                return False
+            flags = token[i + 1 :]
+            return all(flag in _REGEX_FLAG_CHARS for flag in flags)
+    return False
+
+
 def _initial_js_context() -> Dict[str, object]:
     return {
         "last": "start",
@@ -995,6 +1024,8 @@ def _halstead_metrics(tokens: Iterable[str]) -> Dict[str, float]:
         elif tok[0] in {'"', "'", "`"}:
             operands[tok] += 1
         elif tok[0].isdigit():
+            operands[tok] += 1
+        elif _is_regex_literal(tok):
             operands[tok] += 1
         elif tok[0].isalpha() or tok[0] in ("_", "$"):
             operands[tok] += 1
