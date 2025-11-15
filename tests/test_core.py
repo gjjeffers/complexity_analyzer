@@ -15,7 +15,7 @@ from complexity_analyzer.core import analyze_file, available_languages, detect_l
 
 def test_available_languages_are_sorted_and_known():
     langs = available_languages()
-    assert langs == ["java", "javascript", "python"]
+    assert langs == ["java", "javascript", "python", "typescript"]
 
 
 @pytest.mark.parametrize(
@@ -24,6 +24,8 @@ def test_available_languages_are_sorted_and_known():
         ("example.py", "python"),
         ("Example.JAVA", "java"),
         ("widget.mjs", "javascript"),
+        ("metrics.ts", "typescript"),
+        ("Component.TSX", "typescript"),
         ("unknown.txt", None),
     ],
 )
@@ -111,6 +113,43 @@ def sample_js_file(tmp_path) -> Path:
         ]
     )
     path = tmp_path / "module.js"
+    path.write_text(content)
+    return path
+
+
+@pytest.fixture()
+def sample_ts_file(tmp_path) -> Path:
+    content = "\n".join(
+        [
+            "// Leading comment",
+            "",
+            "export interface Item {",
+            "  value: number;",
+            "}",
+            "",
+            "type NullableNumber = number | null;",
+            "",
+            "export function compute(a: number, b: number): number {",
+            "  const sum = a + b;",
+            "  if (sum > 10 && a > 0) {",
+            "    return sum;",
+            "  } else if (sum === 0) {",
+            "    return 0;",
+            "  }",
+            "  return sum - 1;",
+            "}",
+            "",
+            "export default function accumulate(items: Item[] = []): number {",
+            "  let total = 0;",
+            "  for (const item of items ?? []) {",
+            "    total += item?.value ?? 0;",
+            "  }",
+            "  return total;",
+            "}",
+            "",
+        ]
+    )
+    path = tmp_path / "module.ts"
     path.write_text(content)
     return path
 
@@ -212,6 +251,32 @@ def test_analyze_js_file_reports_expected_metrics(sample_js_file):
 
     cyclomatic = result["cyclomatic"]
     assert cyclomatic["total"] == 7
+    assert cyclomatic["by_function"] == []
+
+    halstead = result["halstead"]
+    assert halstead["vocabulary"] > 0
+    assert halstead["length"] > 0
+
+    mi = result["maintainability_index"]
+    assert 0.0 <= mi <= 100.0
+
+
+def test_analyze_ts_file_reports_expected_metrics(sample_ts_file):
+    result = analyze_file(sample_ts_file)
+
+    assert result["language"] == "typescript"
+
+    summary = result["summary"]
+    assert summary == {
+        "lines": 25,
+        "code": 20,
+        "comments": 1,
+        "blanks": 4,
+        "docstrings": 0,
+    }
+
+    cyclomatic = result["cyclomatic"]
+    assert cyclomatic["total"] == 8
     assert cyclomatic["by_function"] == []
 
     halstead = result["halstead"]
