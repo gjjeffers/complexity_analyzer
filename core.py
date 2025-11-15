@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
-from .languages import JavaAnalyzer, JavaScriptAnalyzer, PythonAnalyzer
+from .languages import JavaAnalyzer, JavaScriptAnalyzer, PythonAnalyzer, TypeScriptAnalyzer
 from .languages.base import BaseAnalyzer
 
 __all__ = [
@@ -20,6 +20,7 @@ def _build_analyzers() -> List[BaseAnalyzer]:
         PythonAnalyzer(),
         JavaAnalyzer(),
         JavaScriptAnalyzer(),
+        TypeScriptAnalyzer(),
     ]
 
 
@@ -37,6 +38,8 @@ def available_languages() -> List[str]:
 
 def detect_language(path: Path) -> Optional[str]:
     analyzer = _EXTENSION_MAP.get(path.suffix.lower())
+    if not analyzer and path.name.lower().endswith(".d.ts"):
+        analyzer = _EXTENSION_MAP.get(".d.ts")
     return analyzer.language if analyzer else None
 
 

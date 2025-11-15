@@ -2,7 +2,7 @@
 
 Complexity Analyzer is a lightweight static analysis toolkit that reports
 maintainability metrics for source files. It currently supports Python, Java,
-and JavaScript code, producing:
+JavaScript, and TypeScript code, producing:
 
 * Source line counts (total, code, comment, blank, and docstring lines)
 * Cyclomatic complexity totals (with per-function detail for Python)
@@ -52,7 +52,7 @@ You can import the core helpers to integrate the analyzer into your own tools:
 ```python
 from complexity_analyzer import analyze_file, available_languages
 
-print(available_languages())  # ['java', 'javascript', 'python']
+print(available_languages())  # ['java', 'javascript', 'python', 'typescript']
 metrics = analyze_file("src/example/Foo.java")
 ```
 
@@ -81,6 +81,12 @@ aggregate results match the module-level reporting used by many tools.
 JavaScript analysis mirrors the Java approach. The analyzer recognizes modern
 syntax, strips comments, and performs token-based Halstead and cyclomatic
 complexity calculations across `.js`, `.jsx`, `.mjs`, and `.cjs` files.
+
+### TypeScript
+
+TypeScript analysis reuses the JavaScript pipeline so you can inspect metrics
+for `.ts`, `.tsx`, `.cts`, `.mts`, and declaration files without additional
+configuration.
 
 ## Development
 
